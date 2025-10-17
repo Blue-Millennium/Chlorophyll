@@ -12,12 +12,15 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.EndPortalBlock;
 import net.minecraft.world.level.levelgen.feature.EndPlatformFeature;
 import net.minecraft.world.level.portal.TeleportTransition;
+import net.minecraft.world.level.storage.LevelData;
 import net.minecraft.world.phys.Vec3;
-import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Overwrite;
 
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicReference;
 
 @Mixin(EndPortalBlock.class)
 public class EndPortalBlockMixin {
@@ -26,37 +29,60 @@ public class EndPortalBlockMixin {
      * @reason Worldized ticking
      */
     @Overwrite
-    public TeleportTransition getPortalDestination(@NotNull ServerLevel serverLevel, Entity entity, BlockPos blockPos) {
-        ResourceKey<Level> resourceKey = serverLevel.dimension() == Level.END ? Level.OVERWORLD : Level.END;
-        ServerLevel serverLevel2 = serverLevel.getServer().getLevel(resourceKey);
-        if (serverLevel2 == null) {
+    @Nullable
+    public TeleportTransition getPortalDestination(ServerLevel destinationLevel, Entity entity, BlockPos blockPos) {
+        LevelData.RespawnData respawnData = destinationLevel.getRespawnData();
+        final ResourceKey<Level> destinationLevelKey = destinationLevel.dimension();
+        final boolean isToEnd = destinationLevelKey == Level.END;
+
+        final ResourceKey<Level> endLevelResourceKey = isToEnd ? respawnData.dimension() : Level.END;
+        final BlockPos destinationBlockpos = isToEnd ? respawnData.pos() : ServerLevel.END_SPAWN_POINT;
+        final ServerLevel finalTarget = destinationLevel.getServer().getLevel(endLevelResourceKey);
+
+        if (finalTarget == null) {
             return null;
         } else {
-            boolean bl = resourceKey == Level.END;
-            BlockPos blockPos2 = bl ? ServerLevel.END_SPAWN_POINT : serverLevel2.getSharedSpawnPos();
-            Vec3 vec3 = blockPos2.getBottomCenter();
-            float f;
+            final AtomicReference<Vec3> vec3 = new AtomicReference<>(destinationBlockpos.getBottomCenter());
+            float yRot;
+            float pitch;
             Set<Relative> set;
-            if (bl) {
-                final Vec3 finalVec = vec3;
-                ((ITaskSchedulingLevel) serverLevel2).chlorophyll$getTickLoop().schedule(() -> EndPlatformFeature.createEndPlatform(serverLevel2, BlockPos.containing(finalVec).below(), true));
+            if (!isToEnd) {
+                final Vec3 finalVec = vec3.get();
 
-                f = Direction.WEST.toYRot();
+                // schedule to target async
+                ((ITaskSchedulingLevel) finalTarget).chlorophyll$getTickLoop().schedule(() -> EndPlatformFeature.createEndPlatform(finalTarget, BlockPos.containing(finalVec).below(), true));
+
+                yRot = Direction.WEST.toYRot();
+                pitch = 0.0F;
                 set = Relative.union(Relative.DELTA, Set.of(Relative.X_ROT));
                 if (entity instanceof ServerPlayer) {
-                    vec3 = vec3.subtract(0.0, 1.0, 0.0);
+                    vec3.set(vec3.get().subtract(0.0, 1.0, 0.0));
                 }
             } else {
-                f = 0.0F;
+                yRot = respawnData.yaw();
+                pitch = respawnData.pitch();
                 set = Relative.union(Relative.DELTA, Relative.ROTATION);
-                if (entity instanceof ServerPlayer serverPlayer) {
-                    return serverPlayer.findRespawnPositionAndUseSpawnBlock(false, TeleportTransition.DO_NOTHING);
+
+                CompletableFuture<TeleportTransition> task = CompletableFuture.supplyAsync(() -> {
+                            if (entity instanceof ServerPlayer serverPlayer) {
+                                return serverPlayer.findRespawnPositionAndUseSpawnBlock(false, TeleportTransition.DO_NOTHING);
+                            }
+
+                            vec3.set(entity.adjustSpawnLocation(finalTarget, destinationBlockpos).getBottomCenter());
+                            return null;
+                        },
+                        ((ITaskSchedulingLevel) finalTarget).chlorophyll$getTickLoop().mainThreadExecutorIfOnAsync()
+                );
+                ((ITaskSchedulingLevel) finalTarget).chlorophyll$getTickLoop().spinWait(task);
+
+                final TeleportTransition result = task.join();
+                if (result != null) {
+                    return result;
                 }
 
-                vec3 = entity.adjustSpawnLocation(serverLevel2, blockPos2).getBottomCenter();
             }
 
-            return new TeleportTransition(serverLevel2, vec3, Vec3.ZERO, f, 0.0F, set, TeleportTransition.PLAY_PORTAL_SOUND.then(TeleportTransition.PLACE_PORTAL_TICKET));
+            return new TeleportTransition(finalTarget, vec3.get(), Vec3.ZERO, yRot, pitch, set, TeleportTransition.PLAY_PORTAL_SOUND.then(TeleportTransition.PLACE_PORTAL_TICKET));
         }
     }
 }

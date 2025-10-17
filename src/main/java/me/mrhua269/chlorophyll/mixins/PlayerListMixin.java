@@ -1,5 +1,8 @@
 package me.mrhua269.chlorophyll.mixins;
 
+import com.google.common.collect.Lists;
+import com.google.common.collect.Maps;
+import me.mrhua269.chlorophyll.utils.bridges.ITaskSchedulingEntity;
 import me.mrhua269.chlorophyll.utils.bridges.ITaskSchedulingLevel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.Connection;
@@ -36,7 +39,7 @@ import java.util.UUID;
 @Mixin(PlayerList.class)
 public abstract class PlayerListMixin {
 
-    @Shadow @Final private List<ServerPlayer> players;
+    @Shadow @Final private List<ServerPlayer> players = Lists.newCopyOnWriteArrayList();
 
     @Shadow @Final private MinecraftServer server;
 
@@ -46,7 +49,7 @@ public abstract class PlayerListMixin {
 
     @Shadow public abstract void sendPlayerPermissionLevel(ServerPlayer serverPlayer);
 
-    @Shadow @Final private Map<UUID, ServerPlayer> playersByUUID;
+    @Shadow @Final private Map<UUID, ServerPlayer> playersByUUID = Maps.newConcurrentMap();
 
     @Inject(method = "placeNewPlayer", at = @At(value = "INVOKE", target = "Lnet/minecraft/server/level/ServerLevel;addNewPlayer(Lnet/minecraft/server/level/ServerPlayer;)V", shift = At.Shift.BEFORE))
     public void initConnectionListForPlayer(Connection connection, @NotNull ServerPlayer serverPlayer, CommonListenerCookie commonListenerCookie, CallbackInfo ci){
@@ -58,144 +61,77 @@ public abstract class PlayerListMixin {
      * @reason Worldized ticking
      */
     @Overwrite
-    /*public ServerPlayer respawn(ServerPlayer serverPlayer, boolean bl, Entity.RemovalReason removalReason) {
-        this.players.remove(serverPlayer);
-        serverPlayer.serverLevel().removePlayerImmediately(serverPlayer, removalReason);
-        ((ITaskSchedulingLevel) serverPlayer.serverLevel()).chlorophyll$getTickLoop().removeConnection(serverPlayer.connection.connection);
+    public ServerPlayer respawn(ServerPlayer oldPlayer, boolean bl, Entity.RemovalReason removalReason) {
+        TeleportTransition teleportTransition = oldPlayer.findRespawnPositionAndUseSpawnBlock(!bl, TeleportTransition.DO_NOTHING);
+        this.players.remove(oldPlayer);
+        oldPlayer.level().removePlayerImmediately(oldPlayer, removalReason);
+        ((ITaskSchedulingLevel) oldPlayer.level()).chlorophyll$getTickLoop().removeConnection(oldPlayer.connection.connection);
+        ServerLevel respawnLevel = teleportTransition.newLevel();
+        ServerPlayer newCreatedPlayer = new ServerPlayer(this.server, respawnLevel, oldPlayer.getGameProfile(), oldPlayer.clientInformation());
 
-        TeleportTransition teleportTransition = serverPlayer.findRespawnPositionAndUseSpawnBlock(!bl, TeleportTransition.DO_NOTHING);
-        ServerLevel targetLevel = teleportTransition.newLevel();
-
-        ServerPlayer serverPlayer2 = new ServerPlayer(this.server, targetLevel, serverPlayer.getGameProfile(), serverPlayer.clientInformation());
-        serverPlayer2.connection = serverPlayer.connection;
-        serverPlayer2.restoreFrom(serverPlayer, bl);
-        serverPlayer2.setId(serverPlayer.getId());
-        serverPlayer2.setMainArm(serverPlayer.getMainArm());
+        newCreatedPlayer.connection = oldPlayer.connection;
+        newCreatedPlayer.restoreFrom(oldPlayer, bl);
+        newCreatedPlayer.setId(oldPlayer.getId());
+        newCreatedPlayer.setMainArm(oldPlayer.getMainArm());
 
         if (!teleportTransition.missingRespawnBlock()) {
-            serverPlayer2.copyRespawnPosition(serverPlayer);
+            newCreatedPlayer.copyRespawnPosition(oldPlayer);
         }
 
-        for (String string : serverPlayer.getTags()) {
-            serverPlayer2.addTag(string);
+        for(String string : oldPlayer.getTags()) {
+            newCreatedPlayer.addTag(string);
         }
 
         Vec3 vec3 = teleportTransition.position();
-        serverPlayer2.snapTo(vec3.x, vec3.y, vec3.z, teleportTransition.yRot(), teleportTransition.xRot());
+        newCreatedPlayer.snapTo(vec3.x, vec3.y, vec3.z, teleportTransition.yRot(), teleportTransition.xRot());
         if (teleportTransition.missingRespawnBlock()) {
-            serverPlayer2.connection.send(new ClientboundGameEventPacket(ClientboundGameEventPacket.NO_RESPAWN_BLOCK_AVAILABLE, 0.0F));
+            newCreatedPlayer.connection.send(new ClientboundGameEventPacket(ClientboundGameEventPacket.NO_RESPAWN_BLOCK_AVAILABLE, 0.0F));
         }
 
-        byte dataToKeep = (byte) (bl ? 1 : 0);
-        ServerLevel serverLevel2 = serverPlayer2.serverLevel();
-        LevelData levelData = serverLevel2.getLevelData();
-        serverPlayer2.connection.send(new ClientboundRespawnPacket(serverPlayer2.createCommonSpawnInfo(serverLevel2), dataToKeep));
-        serverPlayer2.connection.teleport(serverPlayer2.getX(), serverPlayer2.getY(), serverPlayer2.getZ(), serverPlayer2.getYRot(), serverPlayer2.getXRot());
-        serverPlayer2.connection.send(new ClientboundSetDefaultSpawnPositionPacket(targetLevel.getSharedSpawnPos(), targetLevel.getSharedSpawnAngle()));
-        serverPlayer2.connection.send(new ClientboundChangeDifficultyPacket(levelData.getDifficulty(), levelData.isDifficultyLocked()));
-        serverPlayer2.connection.send(new ClientboundSetExperiencePacket(serverPlayer2.experienceProgress, serverPlayer2.totalExperience, serverPlayer2.experienceLevel));
-        this.sendActivePlayerEffects(serverPlayer2);
-        this.sendLevelInfo(serverPlayer2, targetLevel);
-        this.sendPlayerPermissionLevel(serverPlayer2);
-        this.players.add(serverPlayer2);
-        this.playersByUUID.put(serverPlayer2.getUUID(), serverPlayer2);
+        final byte respawnFlag = (byte)(bl ? 1 : 0);
+        final LevelData levelData = respawnLevel.getLevelData();
 
-        ((ITaskSchedulingLevel) targetLevel).chlorophyll$getTickLoop().schedule(() -> {
-            ((ITaskSchedulingLevel) targetLevel).chlorophyll$getTickLoop().addConnection(serverPlayer2.connection.connection);
-            targetLevel.addRespawnedPlayer(serverPlayer2);
-            serverPlayer2.initInventoryMenu();
-            serverPlayer2.setHealth(serverPlayer2.getHealth());
-            BlockPos blockPos = serverPlayer2.getRespawnPosition();
+        newCreatedPlayer.connection.send(new ClientboundRespawnPacket(newCreatedPlayer.createCommonSpawnInfo(respawnLevel), respawnFlag));
+        newCreatedPlayer.connection.teleport(newCreatedPlayer.getX(), newCreatedPlayer.getY(), newCreatedPlayer.getZ(), newCreatedPlayer.getYRot(), newCreatedPlayer.getXRot());
+        newCreatedPlayer.connection.send(new ClientboundSetDefaultSpawnPositionPacket(respawnLevel.getRespawnData()));
+        newCreatedPlayer.connection.send(new ClientboundChangeDifficultyPacket(levelData.getDifficulty(), levelData.isDifficultyLocked()));
+        newCreatedPlayer.connection.send(new ClientboundSetExperiencePacket(newCreatedPlayer.experienceProgress, newCreatedPlayer.totalExperience, newCreatedPlayer.experienceLevel));
 
-            ServerLevel serverLevel3 = this.server.getLevel(serverPlayer2.getRespawnDimension());
-            Runnable remaining = () -> {
-                if (!bl && blockPos != null && serverLevel3 != null) {
-                    BlockState blockState = serverLevel3.getBlockState(blockPos);
-                    if (blockState.is(Blocks.RESPAWN_ANCHOR)) {
-                        serverPlayer2.connection.send(new ClientboundSoundPacket(SoundEvents.RESPAWN_ANCHOR_DEPLETE, SoundSource.BLOCKS, blockPos.getX(), blockPos.getY(), blockPos.getZ(), 1.0F, 1.0F, targetLevel.getRandom().nextLong()));
-                    }
-                }
-            };
+        this.sendActivePlayerEffects(newCreatedPlayer);
+        this.sendLevelInfo(newCreatedPlayer, respawnLevel);
+        this.sendPlayerPermissionLevel(newCreatedPlayer);
 
-            if (serverLevel3 != targetLevel) {
-                ((ITaskSchedulingLevel) serverLevel3).chlorophyll$getTickLoop().schedule(remaining);
-                return;
-            }
+        this.players.add(newCreatedPlayer);
+        this.playersByUUID.put(newCreatedPlayer.getUUID(), newCreatedPlayer);
 
-            remaining.run();
-        });
+        ((ITaskSchedulingLevel) respawnLevel).chlorophyll$getTickLoop().schedule(() -> {
+            ((ITaskSchedulingLevel) respawnLevel).chlorophyll$getTickLoop().addConnection(newCreatedPlayer.connection.connection);
+            respawnLevel.addRespawnedPlayer(newCreatedPlayer);
+            newCreatedPlayer.initInventoryMenu();
+            newCreatedPlayer.setHealth(newCreatedPlayer.getHealth());
 
-        return serverPlayer2;
-    }*/
-
-    public ServerPlayer respawn(ServerPlayer dead, boolean bl, Entity.RemovalReason removalReason) {
-        this.players.remove(dead);
-        // remove old connection
-        ((ITaskSchedulingLevel) dead.level()).chlorophyll$getTickLoop().removeConnection(dead.connection.connection);
-        dead.level().removePlayerImmediately(dead, removalReason);
-        TeleportTransition teleportTransition = dead.findRespawnPositionAndUseSpawnBlock(!bl, TeleportTransition.DO_NOTHING);
-        ServerLevel destinationLevel = teleportTransition.newLevel();
-        ServerPlayer newPlayerToPlace = new ServerPlayer(this.server, destinationLevel, dead.getGameProfile(), dead.clientInformation());
-        newPlayerToPlace.connection = dead.connection;
-        newPlayerToPlace.restoreFrom(dead, bl);
-        newPlayerToPlace.setId(dead.getId());
-        newPlayerToPlace.setMainArm(dead.getMainArm());
-        if (!teleportTransition.missingRespawnBlock()) {
-            newPlayerToPlace.copyRespawnPosition(dead);
-        }
-
-        for(String string : dead.getTags()) {
-            newPlayerToPlace.addTag(string);
-        }
-
-        Vec3 vec3 = teleportTransition.position();
-        newPlayerToPlace.snapTo(vec3.x, vec3.y, vec3.z, teleportTransition.yRot(), teleportTransition.xRot());
-        if (teleportTransition.missingRespawnBlock()) {
-            newPlayerToPlace.connection.send(new ClientboundGameEventPacket(ClientboundGameEventPacket.NO_RESPAWN_BLOCK_AVAILABLE, 0.0F));
-        }
-
-        byte b = (byte)(bl ? 1 : 0);
-        ServerLevel serverLevel2 = newPlayerToPlace.level();
-        LevelData levelData = serverLevel2.getLevelData();
-
-        this.players.add(newPlayerToPlace);
-        this.playersByUUID.put(newPlayerToPlace.getUUID(), newPlayerToPlace);
-
-        ((ITaskSchedulingLevel) destinationLevel).chlorophyll$getTickLoop().schedule(() -> {
-            newPlayerToPlace.connection.send(new ClientboundRespawnPacket(newPlayerToPlace.createCommonSpawnInfo(serverLevel2), b));
-            newPlayerToPlace.connection.teleport(newPlayerToPlace.getX(), newPlayerToPlace.getY(), newPlayerToPlace.getZ(), newPlayerToPlace.getYRot(), newPlayerToPlace.getXRot());
-            newPlayerToPlace.connection.send(new ClientboundSetDefaultSpawnPositionPacket(destinationLevel.getSharedSpawnPos(), destinationLevel.getSharedSpawnAngle()));
-            newPlayerToPlace.connection.send(new ClientboundChangeDifficultyPacket(levelData.getDifficulty(), levelData.isDifficultyLocked()));
-            newPlayerToPlace.connection.send(new ClientboundSetExperiencePacket(newPlayerToPlace.experienceProgress, newPlayerToPlace.totalExperience, newPlayerToPlace.experienceLevel));
-            this.sendActivePlayerEffects(newPlayerToPlace);
-            this.sendLevelInfo(newPlayerToPlace, destinationLevel);
-            this.sendPlayerPermissionLevel(newPlayerToPlace);
-            ((ITaskSchedulingLevel) destinationLevel).chlorophyll$getTickLoop().addConnection(newPlayerToPlace.connection.connection);
-            destinationLevel.addRespawnedPlayer(newPlayerToPlace);
-            newPlayerToPlace.initInventoryMenu();
-            newPlayerToPlace.setHealth(newPlayerToPlace.getHealth());
-            ServerPlayer.RespawnConfig respawnConfig = newPlayerToPlace.getRespawnConfig();
+            ServerPlayer.RespawnConfig respawnConfig = newCreatedPlayer.getRespawnConfig();
             if (!bl && respawnConfig != null) {
-                ServerLevel serverLevel3 = this.server.getLevel(respawnConfig.dimension());
-                if (serverLevel3 != null) {
-                    Runnable scheduledAnchorTask = () -> {
-                        BlockPos blockPos = respawnConfig.pos();
-                        BlockState blockState = serverLevel3.getBlockState(blockPos);
-                        if (blockState.is(Blocks.RESPAWN_ANCHOR)) {
-                            newPlayerToPlace.connection.send(new ClientboundSoundPacket(SoundEvents.RESPAWN_ANCHOR_DEPLETE, SoundSource.BLOCKS, (double)blockPos.getX(), (double)blockPos.getY(), (double)blockPos.getZ(), 1.0F, 1.0F, destinationLevel.getRandom().nextLong()));
-                        }
-                    };
+                LevelData.RespawnData respawnData = respawnConfig.respawnData();
+                ServerLevel targetLevelPost = this.server.getLevel(respawnData.dimension());
 
-                    if (serverLevel3 != destinationLevel) {
-                        ((ITaskSchedulingLevel) serverLevel3).chlorophyll$getTickLoop().schedule(scheduledAnchorTask);
-                    } else {
-                        scheduledAnchorTask.run();
-                    }
+                if (targetLevelPost != null) {
+                    ((ITaskSchedulingLevel) targetLevelPost).chlorophyll$getTickLoop().schedule(() -> {
+                        final BlockPos blockPos = respawnData.pos();
+                        final BlockState blockState = targetLevelPost.getBlockState(blockPos);
+
+                        if (blockState.is(Blocks.RESPAWN_ANCHOR)) {
+                            ((ITaskSchedulingEntity) newCreatedPlayer).chlorophyll$getTaskScheduler().schedule(() -> {
+                                newCreatedPlayer.connection.send(new ClientboundSoundPacket(SoundEvents.RESPAWN_ANCHOR_DEPLETE, SoundSource.BLOCKS, blockPos.getX(), blockPos.getY(), (double)blockPos.getZ(), 1.0F, 1.0F, respawnLevel.getRandom().nextLong()));
+                            });
+                        }
+                    });
                 }
+
             }
         });
 
-        return newPlayerToPlace;
+        return newCreatedPlayer;
     }
 
     @Redirect(method = "disconnectAllPlayersWithProfile", at = @At(value = "INVOKE", target = "Lnet/minecraft/server/network/ServerGamePacketListenerImpl;disconnect(Lnet/minecraft/network/chat/Component;)V"))

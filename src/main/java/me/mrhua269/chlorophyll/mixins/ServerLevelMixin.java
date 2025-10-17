@@ -5,10 +5,11 @@ import me.mrhua269.chlorophyll.impl.ChlorophyllLevelTickLoop;
 import me.mrhua269.chlorophyll.utils.bridges.ITaskSchedulingLevel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
-import net.minecraft.network.protocol.game.DebugPackets;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.util.debug.LevelDebugSynchronizers;
 import net.minecraft.world.entity.ai.village.poi.PoiManager;
+import net.minecraft.world.entity.ai.village.poi.PoiRecord;
 import net.minecraft.world.entity.ai.village.poi.PoiType;
 import net.minecraft.world.entity.ai.village.poi.PoiTypes;
 import net.minecraft.world.level.Level;
@@ -24,6 +25,9 @@ import java.util.Optional;
 public abstract class ServerLevelMixin implements ITaskSchedulingLevel {
     @Shadow public abstract PoiManager getPoiManager();
 
+    @Shadow
+    @Final
+    LevelDebugSynchronizers debugSynchronizers;
     @Unique
     private boolean setup = false;
     @Unique
@@ -56,11 +60,13 @@ public abstract class ServerLevelMixin implements ITaskSchedulingLevel {
             BlockPos blockPos2 = blockPos.immutable();
             optional.ifPresent((holder) -> this.tickLoop.execute(() -> {
                 this.getPoiManager().remove(blockPos2);
-                DebugPackets.sendPoiRemovedPacket(((ServerLevel) (Object) this), blockPos2);
+                this.debugSynchronizers.dropPoi(blockPos2);
             }));
             optional2.ifPresent((holder) -> this.tickLoop.execute(() -> {
-                this.getPoiManager().add(blockPos2, holder);
-                DebugPackets.sendPoiRemovedPacket(((ServerLevel) (Object) this), blockPos2);
+                PoiRecord poiRecord = this.getPoiManager().add(blockPos2, holder);
+                if (poiRecord != null) {
+                    this.debugSynchronizers.registerPoi(poiRecord);
+                }
             }));
         }
     }

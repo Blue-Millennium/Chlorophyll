@@ -23,3 +23,5 @@ accessible method net/minecraft/world/entity/ai/behavior/GoToPotentialJobSite st
 accessible method net/minecraft/world/entity/LivingEntity tickDeath ()V
 accessible method net/minecraft/server/level/ServerLevel tickTime ()V
 accessible method net/minecraft/server/level/ServerPlayer$RespawnConfig getDimensionOrDefault (Lnet/minecraft/server/level/ServerPlayer$RespawnConfig;)Lnet/minecraft/resources/ResourceKey;
+accessible class net/minecraft/server/network/config/PrepareSpawnTask$Ready
+accessible field net/minecraft/server/network/config/PrepareSpawnTask nameAndId Lnet/minecraft/server/players/NameAndId;

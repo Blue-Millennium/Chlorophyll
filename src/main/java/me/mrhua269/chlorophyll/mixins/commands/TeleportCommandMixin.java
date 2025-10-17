@@ -51,8 +51,7 @@ public class TeleportCommandMixin {
                     }
 
                     label46: {
-                        if (entity instanceof LivingEntity) {
-                            LivingEntity livingEntity = (LivingEntity)entity;
+                        if (entity instanceof LivingEntity livingEntity) {
                             if (livingEntity.isFallFlying()) {
                                 break label46;
                             }

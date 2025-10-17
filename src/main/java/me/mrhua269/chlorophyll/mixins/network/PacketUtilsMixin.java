@@ -3,6 +3,7 @@ package me.mrhua269.chlorophyll.mixins.network;
 import me.mrhua269.chlorophyll.utils.bridges.ITaskSchedulingEntity;
 import net.minecraft.ReportedException;
 import net.minecraft.network.PacketListener;
+import net.minecraft.network.PacketProcessor;
 import net.minecraft.network.protocol.Packet;
 import net.minecraft.network.protocol.PacketUtils;
 import net.minecraft.server.RunningOnDifferentThreadException;
@@ -35,7 +36,7 @@ public abstract class PacketUtilsMixin {
      * @reason Worldized tick
      */
     @Overwrite
-    public static <T extends PacketListener> void ensureRunningOnSameThread(Packet<T> packet, T packetListener, @NotNull BlockableEventLoop<?> blockableEventLoop) throws RunningOnDifferentThreadException {
+    public static <T extends PacketListener> void ensureRunningOnSameThread(Packet<T> packet, T packetListener, PacketProcessor packetProcessor) throws RunningOnDifferentThreadException {
         Runnable scheduledHandle = () -> {
             if (packetListener.shouldHandleMessage(packet)) {
                 try {
@@ -54,9 +55,9 @@ public abstract class PacketUtilsMixin {
             }
         };
 
-        if (!blockableEventLoop.isSameThread()) {
+        if (!packetProcessor.isSameThread()) {
             if (packetListener instanceof ServerLoginPacketListenerImpl || packetListener instanceof ServerConfigurationPacketListenerImpl || packetListener instanceof ServerStatusPacketListenerImpl){
-                blockableEventLoop.executeIfPossible(scheduledHandle);
+                packetProcessor.scheduleIfPossible(packetListener, packet);
             }else{
                 ((ITaskSchedulingEntity) ((ServerGamePacketListenerImpl) packetListener).player).chlorophyll$getTaskScheduler().schedule(scheduledHandle);
             }

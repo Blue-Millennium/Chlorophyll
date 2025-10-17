@@ -1,6 +1,7 @@
 package me.mrhua269.chlorophyll.utils;
 
 import me.mrhua269.chlorophyll.impl.ChlorophyllLevelTickLoop;
+import net.minecraft.server.level.ServerLevel;
 import org.jetbrains.annotations.Contract;
 
 public class TickThread extends ca.spottedleaf.moonrise.common.util.TickThread { // Bypass the default thread checks by Moonrise
@@ -23,6 +24,16 @@ public class TickThread extends ca.spottedleaf.moonrise.common.util.TickThread {
         }
 
         return null;
+    }
+
+    public static boolean isTickThreadForLevel(ServerLevel level) {
+        final TickThread current = currentThread();
+
+        if (current == null || current.currentTickLoop == null) {
+            return false;
+        }
+
+        return current.isWorldThread() && current.currentTickLoop.getOwnedLevel() == level;
     }
 
     public static boolean isTickThread(){

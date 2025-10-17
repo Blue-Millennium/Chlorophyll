@@ -6,16 +6,19 @@ import com.mojang.logging.LogUtils;
 import me.mrhua269.chlorophyll.Chlorophyll;
 import me.mrhua269.chlorophyll.utils.TickThread;
 import me.mrhua269.chlorophyll.utils.bridges.ITaskSchedulingEntity;
+import net.minecraft.SharedConstants;
 import net.minecraft.network.Connection;
 import net.minecraft.network.PacketSendListener;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.common.ClientboundDisconnectPacket;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.network.ServerGamePacketListenerImpl;
 import net.minecraft.util.TimeUtil;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.storage.ServerLevelData;
+import net.minecraft.world.level.storage.WorldData;
 import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
 
@@ -119,20 +122,21 @@ public class ChlorophyllLevelTickLoop implements Runnable, Executor {
     }
 
     private void saveLevel(){
-        this.ownedLevel.save(null, false,  this.ownedLevel.noSave);
+        this.ownedLevel.save(null, false,  SharedConstants.DEBUG_DONT_SAVE_WORLD || this.ownedLevel.noSave);
 
         if (this.ownedLevel == this.ownedLevel.getServer().overworld()){
-            ServerLevelData serverLevelData = this.ownedLevel.getServer().getWorldData().overworldData();
-            serverLevelData.setWorldBorder(this.ownedLevel.getWorldBorder().createSettings());
-            this.ownedLevel.getServer().getWorldData().setCustomBossEvents(this.ownedLevel.getServer().getCustomBossEvents().save(this.ownedLevel.getServer().registryAccess()));
-            this.ownedLevel.getServer().storageSource.saveDataTag(this.ownedLevel.getServer().registryAccess(), this.ownedLevel.getServer().getWorldData(), this.ownedLevel.getServer().getPlayerList().getSingleplayerData());
+            final MinecraftServer server = this.ownedLevel.getServer();
+            final WorldData worldData = server.getWorldData();
+
+            worldData.setCustomBossEvents(server.getCustomBossEvents().save(server.registryAccess()));
+            server.storageSource.saveDataTag(server.registryAccess(), worldData, server.getPlayerList().getSingleplayerData());
         }
     }
 
     private void savePlayers(){
         for (Connection connection : this.connections){
             final ServerPlayer player = ((ServerGamePacketListenerImpl) connection.getPacketListener()).player;
-            player.getServer().getPlayerList().save(player);
+            player.level().getServer().getPlayerList().save(player);
         }
     }
 
@@ -317,5 +321,18 @@ public class ChlorophyllLevelTickLoop implements Runnable, Executor {
         this.spinWait(task::isDone);
 
         return task.join();
+    }
+
+    public Executor mainThreadExecutorIfOnAsync() {
+        final TickThread current = TickThread.currentThread();
+        if (current == null) {
+            return this::schedule;
+        }
+
+        if (current.currentTickLoop != null && current.currentTickLoop != this) {
+            return this::schedule;
+        }
+
+        return Runnable::run;
     }
 }

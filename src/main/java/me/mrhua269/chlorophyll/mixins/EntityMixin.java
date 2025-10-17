@@ -4,6 +4,7 @@ import me.mrhua269.chlorophyll.utils.EntityTaskScheduler;
 import me.mrhua269.chlorophyll.utils.bridges.ITaskSchedulingEntity;
 import me.mrhua269.chlorophyll.utils.bridges.ITaskSchedulingLevel;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.util.profiling.Profiler;
 import net.minecraft.util.profiling.ProfilerFiller;
 import net.minecraft.world.entity.Entity;
@@ -33,11 +34,28 @@ public abstract class EntityMixin implements ITaskSchedulingEntity {
 
     @Shadow public abstract EntityType<?> getType();
 
-    @Shadow protected abstract void teleportSpectators(TeleportTransition teleportTransition, ServerLevel serverLevel);
-
     @Unique
     @Final
     private final EntityTaskScheduler taskScheduler = new EntityTaskScheduler();
+
+    /**
+     * @author MrHua269
+     * @reason Worldized ticking
+     */
+    @Overwrite
+    public void teleportSpectators(TeleportTransition teleportTransition, ServerLevel serverLevel) {
+        final Entity thisEntity = (Entity) (Object)this;
+
+        for(ServerPlayer serverPlayer : List.copyOf(serverLevel.players())) {
+            ((ITaskSchedulingEntity) serverPlayer).chlorophyll$getTaskScheduler().schedule(() -> {
+                if (serverPlayer.getCamera() == thisEntity) {
+                    serverPlayer.teleport(teleportTransition);
+                    serverPlayer.setCamera(null);
+                }
+            });
+        }
+
+    }
 
     /**
      * @author MrHua269
@@ -63,15 +81,17 @@ public abstract class EntityMixin implements ITaskSchedulingEntity {
             final Entity thisEntity = (Entity) (Object)this;
 
             entity.restoreFrom(thisEntity);
+
             this.removeAfterChangingDimensions();
 
-            entity.teleportSetPosition(PositionMoveRotation.of(teleportTransition), teleportTransition.relatives());
+            entity.teleportSetPosition(PositionMoveRotation.of(thisEntity), PositionMoveRotation.of(teleportTransition), teleportTransition.relatives());
 
             ((ITaskSchedulingLevel) serverLevel2).chlorophyll$getTickLoop().schedule(() -> {
+
                 serverLevel2.addDuringTeleport(entity);
 
                 for(Entity entity3 : list2) {
-                    entity3.startRiding(entity, true);
+                    entity3.startRiding(entity, true, false);
                 }
 
                 serverLevel2.resetEmptyTime();

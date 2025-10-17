@@ -3,7 +3,6 @@ package me.mrhua269.chlorophyll.mixins.ai;
 import me.mrhua269.chlorophyll.utils.bridges.ITaskSchedulingLevel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.GlobalPos;
-import net.minecraft.network.protocol.game.DebugPackets;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.ai.behavior.GoToPotentialJobSite;
 import net.minecraft.world.entity.ai.memory.MemoryModuleType;
@@ -30,9 +29,7 @@ public class GoToPotentialJobSiteMixin {
             if (serverLevel2 != null) {
                 Runnable scheduledRelease = () -> {
                     PoiManager poiManager = serverLevel2.getPoiManager();
-                    if (poiManager.exists(blockPos, (holder) -> {
-                        return true;
-                    })) {
+                    if (poiManager.exists(blockPos, (holder) -> true)) {
                         poiManager.release(blockPos);
                     }
                 };
@@ -43,7 +40,7 @@ public class GoToPotentialJobSiteMixin {
                     scheduledRelease.run();
                 }
 
-                DebugPackets.sendPoiTicketCountPacket(serverLevel, blockPos);
+                serverLevel.debugSynchronizers().updatePoi(blockPos);
             }
         });
 

@@ -3,7 +3,6 @@ package me.mrhua269.chlorophyll.mixins.ai;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.GlobalPos;
 import net.minecraft.core.Holder;
-import net.minecraft.network.protocol.game.DebugPackets;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.ai.behavior.BehaviorControl;
 import net.minecraft.world.entity.ai.behavior.BehaviorUtils;
@@ -46,7 +45,7 @@ public class YieldJobSiteMixin {
                     if (villagerx.getBrain().getMemory(MemoryModuleType.JOB_SITE).isEmpty()) {
                         BehaviorUtils.setWalkAndLookTargetMemories(villagerx, blockPos, f, 1);
                         villagerx.getBrain().setMemory(MemoryModuleType.POTENTIAL_JOB_SITE, GlobalPos.of(serverLevel.dimension(), blockPos));
-                        DebugPackets.sendPoiTicketCountPacket(serverLevel, blockPos);
+                        serverLevel.debugSynchronizers().updatePoi(blockPos);
                     }
 
                 });
